@@ -1216,8 +1216,19 @@ impl GenerateStage<'_> {
     })
   }
 
-  /// BFS from `from` across chunks, following only ES `import` edges through
-  /// still-live target chunks. Returns whether `to` is reachable.
+  /// BFS from `from` across chunks, following only static ES `import` edges
+  /// through still-live target chunks. Returns whether `to` is reachable.
+  ///
+  /// Edge filtering rationale:
+  /// - Only `ImportKind::Import` is followed. Dynamic imports and `require`
+  ///   don't force load-time ordering between chunks, so they can't close the
+  ///   helper-import cycle this check is guarding against.
+  /// - Targets present in `post_chunk_optimization_operations` are skipped.
+  ///   Those chunks are already slated for removal/redirection by the
+  ///   surrounding facade-elimination pass, so their edges aren't part of the
+  ///   post-optimization graph.
+  /// - Self-edges (`target_chunk == current`) are skipped — an intra-chunk
+  ///   import can't form an inter-chunk cycle.
   fn chunk_reaches_via_static_import(
     from: ChunkIdx,
     to: ChunkIdx,
@@ -1237,23 +1248,17 @@ impl GenerateStage<'_> {
         let Some(module) = module_table[module_idx].as_normal() else {
           continue;
         };
-        for rec in &module.import_records {
-          if !matches!(rec.kind, ImportKind::Import) {
-            continue;
-          }
-          let Some(target_module) = rec.resolved_module else {
-            continue;
-          };
-          let Some(target_chunk) = chunk_graph.module_to_chunk[target_module] else {
-            continue;
-          };
-          if target_chunk == current
-            || chunk_graph.post_chunk_optimization_operations.contains_key(&target_chunk)
-          {
-            continue;
-          }
-          queue.push_back(target_chunk);
-        }
+        queue.extend(
+          module
+            .import_records
+            .iter()
+            .filter(|rec| matches!(rec.kind, ImportKind::Import))
+            .filter_map(|rec| chunk_graph.module_to_chunk[rec.resolved_module?])
+            .filter(|&target_chunk| {
+              target_chunk != current
+                && !chunk_graph.post_chunk_optimization_operations.contains_key(&target_chunk)
+            }),
+        );
       }
     }
     false

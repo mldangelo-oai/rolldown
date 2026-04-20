@@ -147,7 +147,7 @@ Facade elimination can introduce **new runtime-helper consumers** after the merg
 - `WrapKind::Esm | WrapKind::None` — `include_symbol(module.namespace_object_ref)` materializes the simulated namespace and explicitly inserts `RuntimeHelper::ExportAll` into the target chunk's `depended_runtime_helper` (emitted JS symbol: `__exportAll`).
 - `WrapKind::Cjs | WrapKind::Esm` — `include_symbol(wrapper_ref)` pulls in the `require_xxx` symbol, which transitively drags whatever helpers the wrapper depends on (`RuntimeHelper::ToEsm`, `RuntimeHelper::CommonJsMin`, etc., emitted as `__toESM`, `__commonJSMin`, …) via the existing inclusion-propagation machinery.
 
-`WrapKind::Esm` hits both branches, so ESM facades can add `ExportAll` *and* wrapper-driven helpers to the same chunk.
+`WrapKind::Esm` hits both branches, so ESM facades can add `ExportAll` _and_ wrapper-driven helpers to the same chunk.
 
 The danger is that the runtime module may already be **co-located** with other modules in some host chunk from the merge phase (the chunker placed it there because the host's bitset matched the runtime's bitset). If the new helper-import edge points from a facade-elim consumer back to that host, and the host has any forward path back to the consumer, the dependency graph closes a cycle. See [#8989](https://github.com/rolldown/rolldown/issues/8989) for the canonical reproduction:
 
