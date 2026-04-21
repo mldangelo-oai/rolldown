@@ -1,7 +1,7 @@
 use std::{
   borrow::Cow,
   path::{Path, PathBuf},
-  sync::{Arc, Weak},
+  sync::{Arc, Mutex, Weak},
 };
 
 use anyhow::Context;
@@ -14,7 +14,6 @@ use rolldown_common::{
 };
 use rolldown_resolver::{ResolveError, Resolver};
 use rolldown_utils::dashmap::FxDashSet;
-use tokio::sync::Mutex;
 use tracing::Instrument;
 
 use crate::{
@@ -59,7 +58,7 @@ impl NativePluginContextImpl {
   ) -> anyhow::Result<()> {
     // Clone out the sender under the lock, then drop the lock before awaiting.
     let sender = {
-      let guard = self.tx.lock().await.clone();
+      let guard = self.tx.lock().ok().context("Failed to acquire tx lock")?.clone();
       guard.context("The `PluginContext.load` only work at `resolveId/load/transform/moduleParsed` hooks. If you using it at resolveId hook, please make sure it could not load the entry module.")?
     };
     sender

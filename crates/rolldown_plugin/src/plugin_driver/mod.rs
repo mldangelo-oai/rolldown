@@ -6,8 +6,12 @@ mod watch_hooks;
 
 pub use plugin_driver_factory::PluginDriverFactory;
 
-use std::{ops::Deref, sync::Arc};
+use std::{
+  ops::Deref,
+  sync::{Arc, Mutex},
+};
 
+use anyhow::Context;
 use arcstr::ArcStr;
 use dashmap::DashMap;
 use rolldown_common::{
@@ -16,7 +20,7 @@ use rolldown_common::{
 };
 use rolldown_utils::dashmap::FxDashSet;
 use sugar_path::SugarPath;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::broadcast;
 
 use crate::{
   __inner::SharedPluginable,
@@ -60,12 +64,12 @@ impl PluginDriver {
     self.module_infos.insert(module_id.as_arc_str().into(), module_info);
   }
 
-  pub async fn set_context_load_modules_tx(
+  pub fn set_context_load_modules_tx(
     &self,
     tx: Option<tokio::sync::mpsc::Sender<ModuleLoaderMsg>>,
-  ) {
-    let mut tx_guard = self.tx.lock().await;
-    *tx_guard = tx;
+  ) -> anyhow::Result<()> {
+    *self.tx.lock().ok().context("Failed to acquire tx lock")? = tx;
+    Ok(())
   }
 
   pub fn mark_context_load_modules_loaded(&self, module_id: ModuleId) {
