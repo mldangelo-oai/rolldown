@@ -10,7 +10,10 @@ use rolldown_ecmascript::{
 };
 use rolldown_ecmascript_utils::ExpressionExt;
 
-use crate::hmr::{hmr_ast_finalizer::HmrAstFinalizer, utils::HmrAstBuilder};
+use crate::hmr::{
+  hmr_ast_finalizer::HmrAstFinalizer,
+  utils::{HmrAstBuilder, MODULE_ID_PARAM_FOR_HMR},
+};
 
 impl<'ast> Traverse<'ast, ()> for HmrAstFinalizer<'_, 'ast> {
   fn enter_program(
@@ -64,46 +67,63 @@ impl<'ast> Traverse<'ast, ()> for HmrAstFinalizer<'_, 'ast> {
 
     let init_fn_name = &self.affected_module_idx_to_init_fn_name[&self.module.idx];
 
-    let mut params = self.snippet.builder.formal_parameters(
+    // The runtime wrappers (createEsmInitializer / createCjsInitializer) call the body
+    // with the module's stable id as an extra argument, so it's available inside the body
+    // as `__rolldown_module_id__`. This lets registerModule / createModuleHotContext reference
+    // the id by identifier instead of duplicating the string literal.
+    let module_id_param = self.snippet.builder.formal_parameter(
+      SPAN,
+      self.builder.vec(),
+      self.snippet.builder.binding_pattern_binding_identifier(SPAN, MODULE_ID_PARAM_FOR_HMR),
+      NONE,
+      NONE,
+      false,
+      None,
+      false,
+      false,
+    );
+    let params = self.snippet.builder.formal_parameters(
       SPAN,
       ast::FormalParameterKind::Signature,
-      self.snippet.builder.vec_with_capacity(2),
+      {
+        if self.module.exports_kind.is_commonjs() {
+          self.snippet.builder.vec_from_array([
+            self.snippet.builder.formal_parameter(
+              SPAN,
+              self.builder.vec(),
+              self
+                .snippet
+                .builder
+                .binding_pattern_binding_identifier(SPAN, CJS_ROLLDOWN_EXPORTS_REF_IDENT),
+              NONE,
+              NONE,
+              false,
+              None,
+              false,
+              false,
+            ),
+            self.snippet.builder.formal_parameter(
+              SPAN,
+              self.builder.vec(),
+              self
+                .snippet
+                .builder
+                .binding_pattern_binding_identifier(SPAN, CJS_ROLLDOWN_MODULE_REF_IDENT),
+              NONE,
+              NONE,
+              false,
+              None,
+              false,
+              false,
+            ),
+            module_id_param,
+          ])
+        } else {
+          self.snippet.builder.vec1(module_id_param)
+        }
+      },
       NONE,
     );
-    if self.module.exports_kind.is_commonjs() {
-      params.items.push(
-        self.snippet.builder.formal_parameter(
-          SPAN,
-          self.builder.vec(),
-          self
-            .snippet
-            .builder
-            .binding_pattern_binding_identifier(SPAN, CJS_ROLLDOWN_EXPORTS_REF_IDENT),
-          NONE,
-          NONE,
-          false,
-          None,
-          false,
-          false,
-        ),
-      );
-      params.items.push(
-        self.snippet.builder.formal_parameter(
-          SPAN,
-          self.builder.vec(),
-          self
-            .snippet
-            .builder
-            .binding_pattern_binding_identifier(SPAN, CJS_ROLLDOWN_MODULE_REF_IDENT),
-          NONE,
-          NONE,
-          false,
-          None,
-          false,
-          false,
-        ),
-      );
-    }
     // function () { [user code] }
     let mut user_code_wrapper = self.snippet.builder.alloc_function(
       SPAN,
@@ -125,28 +145,39 @@ impl<'ast> Traverse<'ast, ()> for HmrAstFinalizer<'_, 'ast> {
     // mark the callback as PIFE because the callback is executed when this chunk is loaded
     user_code_wrapper.pife = self.use_pife_for_module_wrappers;
 
+    // Pass the stable module id so the runtime can short-circuit re-execution
+    // when another lazy blob has already registered this module (see Variables /
+    // destructive-init bug when two lazy requests race the executed_modules ack).
     let initializer_call = if self.module.exports_kind.is_commonjs() {
-      // __rolldown__runtime.createCjsInitializer((function (exports, module) { [user code] }))
+      // __rolldown__runtime.createCjsInitializer(stable_id, (function (exports, module) { [user code] }))
       self.snippet.builder.alloc_call_expression(
         SPAN,
         self.snippet.id_ref_expr("__rolldown_runtime__.createCjsInitializer", SPAN),
         NONE,
-        self
-          .snippet
-          .builder
-          .vec1(ast::Argument::from(ast::Expression::FunctionExpression(user_code_wrapper))),
+        self.snippet.builder.vec_from_array([
+          ast::Argument::StringLiteral(self.snippet.builder.alloc_string_literal(
+            SPAN,
+            self.snippet.builder.str(&self.module.stable_id),
+            None,
+          )),
+          ast::Argument::from(ast::Expression::FunctionExpression(user_code_wrapper)),
+        ]),
         false,
       )
     } else {
-      // __rolldown__runtime.createEsmInitializer((function () { [user code] }))
+      // __rolldown__runtime.createEsmInitializer(stable_id, (function () { [user code] }))
       self.snippet.builder.alloc_call_expression(
         SPAN,
         self.snippet.id_ref_expr("__rolldown_runtime__.createEsmInitializer", SPAN),
         NONE,
-        self
-          .snippet
-          .builder
-          .vec1(ast::Argument::from(ast::Expression::FunctionExpression(user_code_wrapper))),
+        self.snippet.builder.vec_from_array([
+          ast::Argument::StringLiteral(self.snippet.builder.alloc_string_literal(
+            SPAN,
+            self.snippet.builder.str(&self.module.stable_id),
+            None,
+          )),
+          ast::Argument::from(ast::Expression::FunctionExpression(user_code_wrapper)),
+        ]),
         false,
       )
     };

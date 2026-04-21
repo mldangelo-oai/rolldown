@@ -85,18 +85,35 @@ export class DevRuntime {
   /**
    * __esmMin
    *
-   * @type {<T>(fn: any, res: T) => () => T}
+   * Short-circuits when `id` is already registered on the runtime
+   * (e.g. emitted redundantly across two concurrent lazy blobs before
+   * the client's executed-modules ack reaches the server). Guarantees
+   * each module body runs at most once per browser session.
+   *
+   * @type {<T>(id: string, fn: any, res: T) => () => T}
    * @internal
    */
-  createEsmInitializer = (fn, res) => () => (fn && (res = fn((fn = 0))), res);
+  createEsmInitializer = (id, fn, res) => () => (
+    fn && (this.modules[id] ? (fn = 0) : (res = fn((fn = 0, id)))),
+    res
+  );
   /**
    * __commonJSMin
    *
-   * @type {<T extends { exports: any }>(cb: any, mod: { exports: any }) => () => T}
+   * Same cross-blob dedup as createEsmInitializer. If `id` is already
+   * registered, reuse the registered exports object instead of running
+   * the factory again.
+   *
+   * @type {<T extends { exports: any }>(id: string, cb: any, mod?: { exports: any }, registered?: any) => () => T}
    * @internal
    */
-  createCjsInitializer = (cb, mod) => () => (
-    mod || cb((mod = { exports: {} }).exports, mod), mod.exports
+  createCjsInitializer = (id, cb, mod, registered) => () => (
+    mod || (
+      (registered = this.modules[id])
+        ? (mod = { exports: registered.exports })
+        : cb((mod = { exports: {} }).exports, mod, id)
+    ),
+    mod.exports
   );
   /** @internal */
   // @ts-expect-error The variable will be injected at build time.
