@@ -476,11 +476,14 @@ impl GlobImportVisit<'_> {
       .filter_map(Result::ok)
       .filter(|e| !e.file_type().is_dir());
 
-    let self_path = self.relative_path(Path::new(self.id), Some(dir));
-
     for entry in entries {
       let file = entry.path();
       let path = file.to_slash_lossy();
+
+      // Skip the file itself if it matches the glob pattern, to avoid self-importing.
+      if self.id == path {
+        continue;
+      }
 
       let matches_rule = |v: &PathWithGlob| -> bool {
         path.strip_prefix(&v.path).map(|path| fast_glob::glob_match(v.glob, path)).unwrap_or(false)
@@ -500,15 +503,8 @@ impl GlobImportVisit<'_> {
         continue;
       }
 
-      let mut import_path = self.relative_path(file, Some(dir));
-      if self_path == import_path {
-        continue;
-      }
-
+      let import_path = self.relative_path(file, Some(dir));
       let file_path = if let Some(base) = &options.base {
-        if base.starts_with('/') {
-          import_path = self.relative_path(file, None);
-        }
         let base_path = if let Some(base) = base.strip_prefix('/') {
           self.root.join(base)
         } else {
