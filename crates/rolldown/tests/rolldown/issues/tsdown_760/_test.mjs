@@ -3,18 +3,50 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const distDir = path.join(import.meta.dirname, 'dist');
-const jsFiles = fs
-  .readdirSync(distDir)
-  .filter((file) => file.endsWith('.js'))
-  .sort();
+
+function listJsFiles(dir, base = dir) {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((dirent) => {
+      const absolutePath = path.join(dir, dirent.name);
+      if (dirent.isDirectory()) {
+        return listJsFiles(absolutePath, base);
+      }
+      if (!dirent.isFile() || !dirent.name.endsWith('.js')) {
+        return [];
+      }
+      return path.relative(base, absolutePath).split(path.sep).join(path.posix.sep);
+    })
+    .sort();
+}
+
+const jsFiles = listJsFiles(distDir);
+
+function normalizeRelativeImport(fromFile, specifier) {
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+    return null;
+  }
+  const normalized = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
+  return normalized.endsWith('.js') ? normalized : null;
+}
+
+function getStaticImports(file, code) {
+  const imports = [];
+  const pattern =
+    /\bimport\s*(?:["']([^"']+)["']|(?:[^;\n]*?)\bfrom\s*["']([^"']+)["'])|\bexport\s*(?:\*\s*)?(?:[^;\n]*?\bfrom\s*)["']([^"']+)["']/g;
+  for (const match of code.matchAll(pattern)) {
+    const dep = normalizeRelativeImport(file, match[1] ?? match[2] ?? match[3]);
+    if (dep) {
+      imports.push(dep);
+    }
+  }
+  return imports;
+}
 
 const graph = Object.fromEntries(
   jsFiles.map((file) => {
     const code = fs.readFileSync(path.join(distDir, file), 'utf8');
-    const imports = [
-      ...code.matchAll(/(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']\.\/([^"']+)["']/g),
-    ].map((match) => match[1]);
-    return [file, imports];
+    return [file, getStaticImports(file, code)];
   }),
 );
 
@@ -49,6 +81,11 @@ function findCycle() {
   }
   return null;
 }
+
+const missingEdges = Object.entries(graph).flatMap(([file, imports]) =>
+  imports.filter((dep) => !Object.hasOwn(graph, dep)).map((dep) => `${file} -> ${dep}`),
+);
+assert.deepStrictEqual(missingEdges, [], 'Output chunks must not import missing JS chunks');
 
 assert.strictEqual(
   findCycle(),
