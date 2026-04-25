@@ -353,6 +353,7 @@ impl ChunkOptimizationGraph {
       }
     }
     self.chunks[target_chunk_idx].has_side_effects |= source_has_side_effects;
+    self.retarget_aliases_to_merged_root(source_chunk_idx, target_chunk_idx);
     self.merged_chunk_aliases.insert(source_chunk_idx, target_chunk_idx);
     let target_dependencies_need_normalization =
       self.chunks[target_chunk_idx].dependencies.iter().any(|&dep_chunk_idx| {
@@ -368,6 +369,22 @@ impl ChunkOptimizationGraph {
           (dep_chunk_idx != target_chunk_idx).then_some(dep_chunk_idx)
         })
         .collect();
+    }
+  }
+
+  fn retarget_aliases_to_merged_root(
+    &mut self,
+    source_chunk_idx: ChunkIdx,
+    target_chunk_idx: ChunkIdx,
+  ) {
+    let aliases_to_retarget = self
+      .merged_chunk_aliases
+      .keys()
+      .copied()
+      .filter(|&chunk_idx| self.resolve_merged_chunk_idx(chunk_idx) == source_chunk_idx)
+      .collect::<Vec<_>>();
+    for chunk_idx in aliases_to_retarget {
+      self.merged_chunk_aliases.insert(chunk_idx, target_chunk_idx);
     }
   }
 
@@ -1523,13 +1540,14 @@ mod tests {
   fn cycle_check_resolves_alias_chains() {
     // 7 -> 1 and then 1 -> 4 leaves stale external edges that still mention 7.
     // When 4 is later considered for merging into 0, 0 -> 2 -> 7 must resolve
-    // through the full 7 -> 1 -> 4 chain and be rejected as 0 -> 2 -> 0.
+    // through the alias map and be rejected as 0 -> 2 -> 0.
     let mut graph = graph(&[&[2], &[], &[7], &[], &[], &[], &[], &[]]);
     graph.merge_chunk_dependencies(idx(1), idx(7));
     graph.merge_chunk_dependencies(idx(4), idx(1));
 
     let sources = FxHashSet::from_iter([idx(4)]);
 
+    assert_eq!(graph.merged_chunk_aliases.get(&idx(7)), Some(&idx(4)));
     assert!(graph.would_create_circular_dependency_after_merging(idx(0), &sources));
   }
 
