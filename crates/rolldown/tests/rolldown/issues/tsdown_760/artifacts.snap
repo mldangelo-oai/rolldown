@@ -29,7 +29,7 @@ export { depUser };
 
 ```js
 //#region side.js
-globalThis.__rolldown_issue_7449_side = (globalThis.__rolldown_issue_7449_side || 0) + 1;
+globalThis.__rolldown_tsdown_760_side = (globalThis.__rolldown_tsdown_760_side || 0) + 1;
 //#endregion
 export {};
 
@@ -83,12 +83,12 @@ export { lazy };
 import { n as getEnvString } from "./env.js";
 import { t as api } from "./api.js";
 //#region main.js
-globalThis.__rolldown_issue_7449_imports = [
+globalThis.__rolldown_tsdown_760_imports = [
 	import("./lazy.js"),
 	import("./env-user.js"),
 	import("./dep-user.js")
 ];
-globalThis.__rolldown_issue_7449_value = api + Number(getEnvString("MISSING") || 0);
+globalThis.__rolldown_tsdown_760_value = api + Number(getEnvString("MISSING") || 0);
 //#endregion
 export {};
 
